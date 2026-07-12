@@ -469,24 +469,39 @@
       }
     }
 
-    function login() {
+    async function login() {
       let u = document.getElementById('login-user').value;
       let p = document.getElementById('login-pass').value;
       if(!u || !p) return Swal.fire('เตือน', 'กรุณากรอก Username และ Password', 'warning');
+
       Swal.fire({ title: 'กำลังตรวจสอบ...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-      google.script.run.withSuccessHandler(res => {
-        if(res.success) {
-          currentUser = res.username;
+
+      try {
+        // ⚠️ เปลี่ยน YOUR_API_KEY ให้เป็น URL ของชีต Users จาก Sheety
+        let usersUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/users';
+        
+        let response = await fetch(usersUrl);
+        let data = await response.json();
+        
+        let users = data.users || [];
+        
+        // ตรวจสอบว่ามีผู้ใช้ที่ Username และ Password ตรงกันหรือไม่
+        let validUser = users.find(user => String(user.username) === String(u) && String(user.password) === String(p));
+
+        if (validUser) {
+          currentUser = validUser.username;
           localStorage.setItem('sisterMed_user', currentUser); 
           document.getElementById('current-user-display').innerText = 'User: ' + currentUser;
           document.getElementById('login-page').classList.add('hidden');
           document.getElementById('main-app').classList.remove('hidden');
           loadInventory();
         } else {
-          
-          Swal.fire('Error', res.message, 'error');
+          Swal.fire('Error', 'Username หรือ Password ไม่ถูกต้อง', 'error');
         }
-      }).checkLogin(u, p);
+      } catch (error) {
+        console.error('Login error:', error);
+        Swal.fire('Error', 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้', 'error');
+      }
     }
 
     function logout() {
@@ -514,35 +529,68 @@
     }
 
     // 2. ระบบ Transaction
-    function fetchProductDetails() {
+    async function fetchProductDetails() {
       let bc = document.getElementById('t-barcode').value;
       if(!bc) return;
+      
       Swal.fire({ title: 'ค้นหา...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-      google.script.run.withSuccessHandler(res => {
-        Swal.close();
-        if(res.name) document.getElementById('t-name').value = res.name;
+      
+      try {
+        // ⚠️ อย่าลืมเปลี่ยน YOUR_API_KEY เป็น URL ของคุณจาก Sheety
+        let productsUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/products';
+        let transactionsUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/transactions';
         
-        currentProductLots = res.lots;
+        // ดึงข้อมูลจาก 2 ชีตพร้อมกัน (Products เพื่อหาชื่อ และ Transactions เพื่อหา Lot)
+        let [prodRes, transRes] = await Promise.all([
+          fetch(productsUrl),
+          fetch(transactionsUrl)
+        ]);
+        
+        let prodData = await prodRes.json();
+        let transData = await transRes.json();
+        
+        // 1. หาชื่อสินค้าจากชีต Products
+        let foundProduct = prodData.products.find(p => String(p.barcode) === String(bc));
+        if(foundProduct && foundProduct.productName) {
+          document.getElementById('t-name').value = foundProduct.productName;
+        }
+
+        // 2. หา Lot. No. และ Exp. Date จากชีต Transactions
+        let lotMap = {};
+        transData.transactions.forEach(t => {
+          if (String(t.barcode) === String(bc) && t.lotNo && t.expDate) {
+            lotMap[t.lotNo] = t.expDate;
+          }
+        });
+        
+        currentProductLots = Object.keys(lotMap).map(lot => ({ lot: lot, exp: lotMap[lot] }));
+        
+        // แสดงผล Lot ตาม UI เดิม
         let datalist = document.getElementById('lot-list');
         datalist.innerHTML = ''; 
         if (currentProductLots.length > 0) {
           currentProductLots.forEach(item => {
-            let option = 
-            document.createElement('option');
+            let option = document.createElement('option');
             option.value = item.lot;
             datalist.appendChild(option);
           });
+          
           if (currentProductLots.length === 1) {
             document.getElementById('t-lot').value = currentProductLots[0].lot;
             document.getElementById('t-exp').value = currentProductLots[0].exp;
           } else {
-          
             document.getElementById('t-lot').value = '';
             document.getElementById('t-exp').value = '';
             Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'พบหลาย Lot กรุณาเลือก Lot. No.', showConfirmButton: false, timer: 3000 });
           }
         }
-      }).getProductDetails(bc);
+        
+        Swal.close();
+        
+      } catch (error) {
+        console.error('Error fetching details:', error);
+        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้', 'error');
+      }
     }
 
     function autoFillExp() {
@@ -551,7 +599,8 @@
       if (found) document.getElementById('t-exp').value = found.exp;
     }
 
-    function saveTransaction() {
+    async function saveTransaction() {
+      // ดึงค่าจากฟอร์มตามโค้ดเดิมของคุณ
       let data = {
         type: document.getElementById('t-type').value,
         date: document.getElementById('t-date').value,
@@ -562,7 +611,6 @@
         qty: document.getElementById('t-qty').value,
         note: document.getElementById('t-note').value,
         user: currentUser
-    
       };
       
       if(!data.barcode || !data.productName || !data.lotNo || !data.expDate || !data.qty) {
@@ -570,8 +618,37 @@
       }
 
       Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-      google.script.run.withSuccessHandler(() => {
+      
+      try {
+        // ⚠️ เปลี่ยน YOUR_API_KEY ให้เป็น URL ของชีต Transactions จาก Sheety
+        let apiUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/transactions';
+        
+        // จัดรูปแบบข้อมูลให้ตรงกับหัวตารางของ Sheety
+        let bodyData = {
+          transaction: {
+            date: data.date,
+            type: data.type,
+            barcode: data.barcode,
+            productName: data.productName,
+            lotNo: data.lotNo,
+            expDate: data.expDate,
+            qty: parseFloat(data.qty) || 1, // บังคับให้เป็นตัวเลข
+            note: data.note,
+            user: data.user
+          }
+        };
+
+        let response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyData)
+        });
+
+        if (!response.ok) throw new Error('Network response was not ok');
+
         Swal.fire('สำเร็จ', 'บันทึกข้อมูลเรียบร้อย', 'success');
+        
+        // เคลียร์ค่าในช่องกรอกข้อมูล
         document.getElementById('t-barcode').value = '';
         document.getElementById('t-name').value = '';
         document.getElementById('t-lot').value = '';
@@ -579,29 +656,106 @@
         document.getElementById('t-qty').value = ''; 
         document.getElementById('t-note').value = '';
         document.getElementById('lot-list').innerHTML = '';
-      }).saveTransaction(data);
+
+      } catch (error) {
+        console.error('Error:', error);
+        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้', 'error');
+      }
     }
 
     // 3. ระบบ Inventory และ Dashboard
-    function loadInventory() {
+    async function loadInventory() {
       Swal.fire({ title: 'กำลังโหลดข้อมูลล่าสุด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-      // ดึงข้อมูล Dashboard ยอดสะสมต่างๆ ก่อน
-      google.script.run.withSuccessHandler(stats => {
-        currentTotalIn = stats.totalIn;
-        currentTotalOut = stats.totalOut;
-        currentTotalProducts = stats.totalProducts;
+      
+      try {
+        // ⚠️ เปลี่ยน YOUR_API_KEY ของแต่ละชีต
+        let transUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/transactions';
+        let prodUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/products';
+        let actionsUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/actions';
+
+        // ดึงข้อมูล 3 ชีตพร้อมกันเพื่อความรวดเร็ว
+        let [transRes, prodRes, actionsRes] = await Promise.all([
+          fetch(transUrl), fetch(prodUrl), fetch(actionsUrl)
+        ]);
+
+        let transData = await transRes.json();
+        let prodData = await prodRes.json();
+        let actionsData = await actionsRes.json();
+
+        let transactions = transData.transactions || [];
+        let products = prodData.products || [];
+        let actions = actionsData.actions || [];
+
+        // 1. คำนวณข้อมูลรวมสำหรับ Dashboard
+        currentTotalProducts = products.length;
+        currentTotalIn = 0;
+        currentTotalOut = 0;
+
+        let inventory = {};
+        let managedLots = {};
+
+        // 2. จัดกลุ่มข้อมูลการจัดการ (Actions)
+        actions.forEach(a => {
+          let key = a.barcode + "_" + a.lotNo;
+          managedLots[key] = { type: a.actionType, note: a.actionNote };
+        });
+
+        // 3. คำนวณยอดคงเหลือจาก Transactions
+        transactions.forEach(t => {
+          let type = t.type;
+          let qty = parseFloat(t.qty) || 1;
+          let key = t.barcode + "_" + t.lotNo;
+
+          if (type === 'IN') currentTotalIn += qty;
+          if (type === 'OUT') currentTotalOut += qty;
+
+          if (!inventory[key]) {
+            inventory[key] = {
+              barcode: t.barcode, name: t.productName, lot: t.lotNo, exp: t.expDate, qty: 0,
+              status: '', days: 0,
+              managedType: managedLots[key] ? managedLots[key].type : '',
+              managedNote: managedLots[key] ? managedLots[key].note : ''
+            };
+          }
+          if (type === 'IN') inventory[key].qty += qty;
+          if (type === 'OUT') inventory[key].qty -= qty;
+        });
+
+        // 4. คำนวณวันหมดอายุและการประเมินสถานะ
+        let result = [];
+        let today = new Date();
+        today.setHours(0,0,0,0);
+
+        for (let key in inventory) {
+          if (inventory[key].qty > 0 && inventory[key].exp) {
+            let expDateParts = inventory[key].exp.split('-');
+            let expDate = new Date(expDateParts[0], expDateParts[1]-1, expDateParts[2]);
+            let diffTime = expDate.getTime() - today.getTime();
+            let diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            inventory[key].days = diffDays;
+            if (diffDays > 180) inventory[key].status = 'Normal';
+            else if (diffDays > 90 && diffDays <= 180) inventory[key].status = 'Warning';
+            else if (diffDays > 30 && diffDays <= 90) inventory[key].status = 'Near Expiry';
+            else if (diffDays > 0 && diffDays <= 30) inventory[key].status = 'Critical';
+            else inventory[key].status = 'Expired';
+
+            result.push(inventory[key]);
+          }
+        }
+
+        // 5. บันทึกผลลงตัวแปรหลักและเรียกใช้ฟังก์ชันแสดงผล
+        currentInventoryData = result;
+        renderOverview();
+        renderSearchTable();
+        renderAlertTable();
         
-        // เมื่อได้ยอดรวมแล้ว จึงดึงข้อมูลสินค้าคงคลังต่อ
-        google.script.run.withSuccessHandler(res => {
-          currentInventoryData = res;
-          renderOverview();
-        
-          renderSearchTable();
-          renderAlertTable();
-          Swal.close();
-        }).getInventoryData();
-        
-      }).getDashboardStats();
+        Swal.close();
+
+      } catch (error) {
+        console.error('Error loading inventory:', error);
+        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเพื่อดึงข้อมูลได้', 'error');
+      }
     }
 
     function renderOverview() {
@@ -872,58 +1026,82 @@
     }
 
     // 5. ระบบรายงานและ PDF
-    function loadReport() {
+    async function loadReport() {
       let st = document.getElementById('r-start').value;
       let en = document.getElementById('r-end').value;
+      
+      if (!st || !en) return Swal.fire('เตือน', 'กรุณาเลือกช่วงวันที่ให้ครบถ้วน', 'warning');
+
       Swal.fire({ title: 'กำลังโหลด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-      google.script.run.withSuccessHandler(res => {
-        currentReportData = res;
+      
+      try {
+        // ⚠️ เปลี่ยน YOUR_API_KEY ให้เป็น URL ของชีต Transactions จาก Sheety
+        let transUrl = 'https://api.sheety.co/7e182e4eaf535e0df34f4beda4da8029/พัฒนาระบบสต็อกสินค้า/transactions';
         
+        let response = await fetch(transUrl);
+        let data = await response.json();
+        let transactions = data.transactions || [];
+
+        // แปลงข้อความวันที่ให้อยู่ในรูปแบบที่ใช้เปรียบเทียบได้
+        let startDate = new Date(st);
+        startDate.setHours(0, 0, 0, 0);
+        let endDate = new Date(en);
+        endDate.setHours(23, 59, 59, 999);
+
+        // กรองข้อมูลเฉพาะวันที่เลือก
+        let filteredTransactions = transactions.filter(t => {
+          if (!t.date) return false;
+          let tDate = new Date(t.date);
+          return tDate >= startDate && tDate <= endDate;
+        });
+
         // ดึงค่าจากช่องค้นหา
         let searchKeyword = document.getElementById('reportSearchInput').value.toLowerCase().trim();
         let tbody = document.getElementById('monthly-tbody');
         tbody.innerHTML = '';
         
-        let currentTotalQty = 0; // เพิ่มตัวแปรสำหรับเก็บยอดรวมสุทธิ
+        let currentTotalQty = 0;
 
-        res.forEach(r => {
+        filteredTransactions.forEach(r => {
           // ตรวจสอบคำค้นหา
           let isMatch = true;
           if (searchKeyword !== '') {
-            let nameMatch = (r.name || '').toLowerCase().includes(searchKeyword);
+            let nameMatch = (r.productName || '').toLowerCase().includes(searchKeyword);
             let barcodeMatch = (r.barcode || '').toString().toLowerCase().includes(searchKeyword);
-            let lotMatch = (r.lot || '').toString().toLowerCase().includes(searchKeyword);
+            let lotMatch = (r.lotNo || '').toString().toLowerCase().includes(searchKeyword);
             isMatch = nameMatch || barcodeMatch || lotMatch;
           }
 
           if (isMatch) {
-            // คำนวณยอดรวมสุทธิ รับเข้าบวก เบิกออกลบ และตั้งค่าเครื่องหมายกับสี
-            let itemQty = parseFloat(r.qty) || 0;
+            let itemQty = parseFloat(r.qty) || 1;
             let displayQty = '';
             let qtyColor = '';
 
+            // บวกลบยอดตามประเภทรายการ
             if (r.type === 'IN') {
               currentTotalQty += itemQty;
-              displayQty = '+ ' + r.qty;
-              qtyColor = 'text-success'; // สีเขียว
+              displayQty = '+ ' + itemQty;
+              qtyColor = 'text-success'; 
             } else if (r.type === 'OUT') {
               currentTotalQty -= itemQty;
-              displayQty = '- ' + r.qty;
-              qtyColor = 'text-danger'; // สีแดง
+              displayQty = '- ' + itemQty;
+              qtyColor = 'text-danger'; 
             } else {
-              displayQty = r.qty;
+              displayQty = itemQty;
             }
 
             let typeColor = r.type === 'IN' ? 'text-success' : 'text-danger';
             let typeIcon = r.type === 'IN' ? '<i class="bi bi-box-arrow-in-down"></i>' : '<i class="bi bi-box-arrow-up"></i>';
+            let displayDate = r.date ? r.date.substring(0, 10) : '-';
+
+            // แสดงผลในตาราง โดยใช้ key ให้ตรงกับ Sheety (เช่น r.productName แทน r.name)
             tbody.innerHTML += `
               <tr>
-                <td>${r.date.substring(0,10)}</td>
+                <td>${displayDate}</td>
                 <td class="fw-bold ${typeColor}">${typeIcon} ${r.type}</td>
                 <td>${r.barcode}</td>
-                <td class="fw-bold">${r.name}</td>
-                
-                <td>${r.lot}</td>
+                <td class="fw-bold">${r.productName}</td>
+                <td>${r.lotNo}</td>
                 <td class="text-center fw-bold ${qtyColor}">${displayQty}</td>
                 <td>${r.user}</td>
               </tr>
@@ -935,7 +1113,6 @@
         let tfoot = document.getElementById('monthly-tfoot');
         if (tbody.innerHTML !== '') {
           tfoot.classList.remove('hidden');
-          // จัดสีตัวเลขยอดรวมตามค่าที่ได้ (บวก = เขียว, ลบ = แดง)
           let totalColorClass = currentTotalQty >= 0 ? 'text-success' : 'text-danger';
           document.getElementById('monthly-total-qty').innerHTML = `<span class="${totalColorClass}">${currentTotalQty.toLocaleString()}</span>`;
         } else {
@@ -943,7 +1120,11 @@
         }
 
         Swal.close();
-      }).getTransactionsByDate(st, en);
+
+      } catch (error) {
+        console.error('Report Error:', error);
+        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถดึงข้อมูลรายงานได้', 'error');
+      }
     }
 
     function generatePDF(filename) {
