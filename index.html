@@ -418,7 +418,7 @@
   <div id="pdf-container" style="display:none;">
     <div id="pdf-content" style="padding: 18px;">
       <div class="pdf-header">
-        <img src="https://raw.githubusercontent.com/apiratisisters-eng/imagelogo/refs/heads/main/logo.png" alt="Logo" style="width: 60px;">
+        <img src="https://raw.githubusercontent.com/apiratisisters-eng/imagelogo/refs/heads/main/logo.png" alt="Logo" style="width: 40px;">
         <h3 style="margin-top:10px;">คลินิกเทคนิคการแพทย์ซิสเตอร์ ศูนย์ระยอง</h3>
         <h4 id="pdf-title"></h4>
         <p id="pdf-subtitle"></p>
@@ -1135,7 +1135,7 @@
         margin:       0.5,
         filename:     filename + '.pdf',
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2 },
+        html2canvas:  { scale: 2, useCORS: true }, // รหัสสำคัญ: ต้องมี useCORS: true ตรงนี้ครับ!
         jsPDF:        { unit: 'in', format: 'A4', orientation: 'landscape' } 
       };
       html2pdf().set(opt).from(element).save().then(() => {
