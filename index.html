@@ -704,20 +704,23 @@
 
         // 3. คำนวณยอดคงเหลือจาก Transactions
         transactions.forEach(t => {
-          // แก้ไข: เปลี่ยนจาก t.barcode มาใช้ t.productName จับคู่กับล็อตแทน
-          // เติม .trim() เพื่อป้องกันปัญหาแอดมินเผลอพิมพ์เว้นวรรคเกินในชื่อสินค้าหรือเลขล็อต
-          let key = (t.productName || '').trim() + "_" + (t.lotNo || '').trim(); 
-          
-          if (!lotBalances[key]) lotBalances[key] = 0;
-          
-          let qtyAmt = parseFloat(t.qty) || 0;
-          if (t.type === 'IN') {
-            lotBalances[key] += qtyAmt;
-          } else if (t.type === 'OUT') {
-            lotBalances[key] -= qtyAmt;
+          let type = t.type;
+          let qty = parseFloat(t.qty) || 1;
+          let key = t.barcode + "_" + t.lotNo;
+
+          if (type === 'IN') currentTotalIn += qty;
+          if (type === 'OUT') currentTotalOut += qty;
+
+          if (!inventory[key]) {
+            inventory[key] = {
+              barcode: t.barcode, name: t.productName, lot: t.lotNo, exp: t.expDate, qty: 0,
+              status: '', days: 0,
+              managedType: managedLots[key] ? managedLots[key].type : '',
+              managedNote: managedLots[key] ? managedLots[key].note : ''
+            };
           }
-          // บันทึกค่ายอดคงเหลือ ณ วินาทีนั้นลงไปใน Object รายการสินค้า
-          t.computedBalance = lotBalances[key]; 
+          if (type === 'IN') inventory[key].qty += qty;
+          if (type === 'OUT') inventory[key].qty -= qty;
         });
 
         // 4. คำนวณวันหมดอายุและการประเมินสถานะ
