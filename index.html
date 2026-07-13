@@ -371,7 +371,7 @@
             <table class="table table-hover mb-0" id="monthly-table">
               <thead class="table-dark">
                 <tr>
-                  <th>วันที่</th><th>ประเภท</th><th>บาร์โค้ด</th><th>ชื่อสินค้า</th><th>Lot. No.</th><th>จำนวน</th><th>ผู้ทำรายการ</th>
+                  <th>วันที่</th><th>ประเภท</th><th>บาร์โค้ด</th><th>ชื่อสินค้า</th><th>Lot. No.</th><th>จำนวน</th><th>คงเหลือ</th><th>ผู้ทำรายการ</th>
                 </tr>
               </thead>
               <tbody id="monthly-tbody"></tbody>
@@ -379,7 +379,8 @@
                 <tr>
                   <td colspan="5" class="text-end">ยอดรวมสุทธิที่แสดง (รับเข้า - เบิกออก):</td>
                   <td id="monthly-total-qty" class="text-center fs-6">0</td>
-                  <td></td>
+                  <td></td> <!-- เว้นไว้ให้ตรงกับคอลัมน์คงเหลือ -->
+                  <td></td> <!-- เว้นไว้ให้ตรงกับคอลัมน์ผู้ทำรายการ -->
                 </tr>
               </tfoot>
             </table>
@@ -703,23 +704,20 @@
 
         // 3. คำนวณยอดคงเหลือจาก Transactions
         transactions.forEach(t => {
-          let type = t.type;
-          let qty = parseFloat(t.qty) || 1;
-          let key = t.barcode + "_" + t.lotNo;
-
-          if (type === 'IN') currentTotalIn += qty;
-          if (type === 'OUT') currentTotalOut += qty;
-
-          if (!inventory[key]) {
-            inventory[key] = {
-              barcode: t.barcode, name: t.productName, lot: t.lotNo, exp: t.expDate, qty: 0,
-              status: '', days: 0,
-              managedType: managedLots[key] ? managedLots[key].type : '',
-              managedNote: managedLots[key] ? managedLots[key].note : ''
-            };
+          // แก้ไข: เปลี่ยนจาก t.barcode มาใช้ t.productName จับคู่กับล็อตแทน
+          // เติม .trim() เพื่อป้องกันปัญหาแอดมินเผลอพิมพ์เว้นวรรคเกินในชื่อสินค้าหรือเลขล็อต
+          let key = (t.productName || '').trim() + "_" + (t.lotNo || '').trim(); 
+          
+          if (!lotBalances[key]) lotBalances[key] = 0;
+          
+          let qtyAmt = parseFloat(t.qty) || 0;
+          if (t.type === 'IN') {
+            lotBalances[key] += qtyAmt;
+          } else if (t.type === 'OUT') {
+            lotBalances[key] -= qtyAmt;
           }
-          if (type === 'IN') inventory[key].qty += qty;
-          if (type === 'OUT') inventory[key].qty -= qty;
+          // บันทึกค่ายอดคงเหลือ ณ วินาทีนั้นลงไปใน Object รายการสินค้า
+          t.computedBalance = lotBalances[key]; 
         });
 
         // 4. คำนวณวันหมดอายุและการประเมินสถานะ
